@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import Head from "next/head";
 import Image from "next/image";
 
 const TYPE_OPTIONS = [
@@ -13,17 +12,17 @@ const TYPE_OPTIONS = [
 function getTypeBadgeClasses(type) {
   switch (type) {
     case "movie":
-      return "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-800";
+      return "bg-blue-900/40 text-blue-200 border-blue-800";
     case "tv_show":
-      return "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/40 dark:text-violet-200 dark:border-violet-800";
+      return "bg-violet-900/40 text-violet-200 border-violet-800";
     case "song":
-      return "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-800";
+      return "bg-emerald-900/40 text-emerald-200 border-emerald-800";
     case "youtube":
-      return "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-800";
+      return "bg-rose-900/40 text-rose-200 border-rose-800";
     case "book":
-      return "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-800";
+      return "bg-amber-900/40 text-amber-200 border-amber-800";
     default:
-      return "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700";
+      return "bg-gray-800 text-gray-200 border-gray-700";
   }
 }
 
@@ -34,16 +33,15 @@ function formatTypeLabel(type) {
 
 function Avatar({ sender }) {
   const [failed, setFailed] = useState(false);
-  const initial = (sender || "?").charAt(0).toUpperCase();
-  const src = `/pfp/${initial}.jpg`;
+  const src = `/pfp/${sender}.jpg`;
   if (!sender) return null;
   return failed ? (
     <div
-      className="inline-flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-700 border border-black/5 dark:bg-white/10 dark:text-gray-200 dark:border-white/10"
+      className="inline-flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-gray-200 border border-white/10"
       aria-label={`${sender} profile placeholder`}
       title={sender}
     >
-      {initial}
+      {sender}
     </div>
   ) : (
     <Image
@@ -51,7 +49,7 @@ function Avatar({ sender }) {
       alt={`${sender} profile photo`}
       width={28}
       height={28}
-      className="h-7 w-7 rounded-full border border-black/5 dark:border-white/10 object-cover"
+      className="h-7 w-7 rounded-full border border-white/10 object-cover"
       onError={() => setFailed(true)}
       priority={false}
     />
@@ -73,15 +71,7 @@ export default function Home({ items, lastUpdated }) {
 
   return (
     <div className="font-sans min-h-screen">
-      <Head>
-        <title>Mentions - from group chat</title>
-        <meta
-          name="description"
-          content="Aggregate and browse media recommendations from your group chat"
-        />
-      </Head>
-
-      <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-background/70 bg-background/90 border-b border-black/5 dark:border-white/8">
+      <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-background/70 bg-background/90 border-b border-white/8">
         <div className="mx-auto max-w-5xl px-4 py-4 sm:px-0">
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-2xl font-bold tracking-tight">Mentions</h1>
@@ -95,7 +85,7 @@ export default function Home({ items, lastUpdated }) {
               />
               <label
                 htmlFor="uploadChat"
-                className="inline-flex items-center gap-2 rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
+                className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-black/40 px-3 py-1.5 text-sm font-medium text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
               >
                 Upload chat
               </label>
@@ -117,7 +107,7 @@ export default function Home({ items, lastUpdated }) {
                     className={`shrink-0 rounded-md border px-2 py-1 text-sm transition-colors  ${
                       isActive
                         ? "bg-pink-600 text-white border-pink-600"
-                        : "bg-white dark:bg-black/40 border-black/10 dark:border-white/10 text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-white/5"
+                        : "bg-black/40 border-white/10 text-gray-100 hover:bg-white/5"
                     }`}
                     aria-pressed={isActive}
                     aria-label={
@@ -137,14 +127,14 @@ export default function Home({ items, lastUpdated }) {
 
       <main className="px-4 sm:px-0 py-6">
         {lastUpdated ? (
-          <p className="mb-6 text-sm text-center text-gray-600 dark:text-gray-400">
+          <p className="mb-6 text-sm text-center text-gray-400">
             Last updated on {lastUpdated}
           </p>
         ) : null}
         {computed.list.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-lg font-semibold">No results</p>
-            <p className="text-gray-600 dark:text-gray-400 mt-1">
+            <p className="text-gray-400 mt-1">
               Try adjusting search or filters.
             </p>
           </div>
@@ -195,7 +185,7 @@ export default function Home({ items, lastUpdated }) {
                     {Array.isArray(item.mentioned_by) &&
                     item.mentioned_by.length > 0 ? (
                       <div className="mt-3">
-                        <div className="text-sm text-gray-700 dark:text-gray-300 mb-1">
+                        <div className="text-sm text-gray-300 mb-1">
                           Mentioned by
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
