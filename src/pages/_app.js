@@ -20,8 +20,15 @@ export default function App({ Component, pageProps }) {
           name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
         />
+        <title>Mentions from group chat</title>
+        <meta
+          name="description"
+          content="Aggregate and browse media recommendations from your group chat"
+        />
       </Head>
-      <div className={`${geistSans.variable} ${geistMono.variable} font-sans`}>
+      <div
+        className={`${geistSans.variable} ${geistMono.variable} font-sans max-w-4xl mx-auto`}
+      >
         <Component {...pageProps} />
       </div>
     </>
