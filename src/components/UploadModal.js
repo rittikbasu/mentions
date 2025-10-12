@@ -12,26 +12,12 @@ function extractMessagesByTimestamps(text, targetTimestamps) {
     (targetTimestamps || []).map((t) => normalizeTimestampString(t))
   );
   const result = {};
-  const lines = String(text || "").split(/\r?\n/);
-  const re =
-    /^\[(\d{1,2}\/\d{1,2}\/\d{2,4}),\s+(\d{1,2}:\d{2}:\d{2})[\u202F\u00A0 ]?(AM|PM)\]\s+(.*)$/i;
-
-  for (const line of lines) {
-    const m = line.match(re);
-    if (!m) continue;
-    const datePart = m[1];
-    const timePart = m[2];
-    const ampm = m[3].toUpperCase();
-    const rest = m[4];
-    const normalizedKey = normalizeTimestampString(
-      `${datePart}, ${timePart} ${ampm}`
-    );
-    if (!normalizedTargets.has(normalizedKey)) continue;
-    const colonIdx = rest.indexOf(": ");
-    const senderPart = colonIdx >= 0 ? rest.slice(0, colonIdx).trim() : "";
-    const messageText =
-      colonIdx >= 0 ? rest.slice(colonIdx + 2).trim() : rest.trim();
-    result[normalizedKey] = { sender: senderPart, text: messageText };
+  const messages = parseChat(text);
+  for (const msg of messages) {
+    const key = normalizeTimestampString(msg.timestamp);
+    if (normalizedTargets.has(key) && !result[key]) {
+      result[key] = { sender: msg.sender, text: msg.text };
+    }
   }
   return result;
 }
@@ -41,6 +27,33 @@ async function sha256Hex(input) {
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function parseChat(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const re =
+    /^\[(\d{1,2}\/\d{1,2}\/\d{2,4}),\s+(\d{1,2}:\d{2}:\d{2})[\u202F\u00A0 ]?(AM|PM)\]\s+(.*)$/i;
+  const out = [];
+  let current = null;
+
+  for (const rawLine of lines) {
+    const m = rawLine.match(re);
+    if (m) {
+      if (current) out.push(current);
+      const tsStr = `${m[1]}, ${m[2]} ${m[3].toUpperCase()}`;
+      const rest = m[4];
+      const colonIdx = rest.indexOf(": ");
+      const sender = colonIdx >= 0 ? rest.slice(0, colonIdx).trim() : "";
+      const body =
+        colonIdx >= 0 ? rest.slice(colonIdx + 2).trim() : rest.trim();
+      current = { timestamp: tsStr, sender, text: body };
+    } else if (current) {
+      const line = rawLine.trim();
+      if (line.length > 0) current.text += `\n${line}`;
+    }
+  }
+  if (current) out.push(current);
+  return out;
 }
 
 function parseTimestampToMs(s) {
@@ -85,6 +98,14 @@ export default function UploadModal({ open, onClose }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState("");
+  const [showProgress, setShowProgress] = useState(false);
+  const [progress, setProgress] = useState({
+    processedMessages: 0,
+    totalMessages: 0,
+    processedBatches: 0,
+    totalBatches: 0,
+    lastTimestamp: "",
+  });
   const fileInputRef = useRef(null);
   const dialogRef = useRef(null);
 
@@ -185,17 +206,11 @@ export default function UploadModal({ open, onClose }) {
       }
 
       // Progress check: ensure last message timestamp > progressTimestamp
-      const effectiveProgress =
-        data.progressTimestamp || progressTimestamp || "";
-      const lines = String(content || "").split(/\r?\n/);
-      const re =
-        /^\[(\d{1,2}\/\d{1,2}\/\d{2,4}),\s+(\d{1,2}:\d{2}:\d{2})[\u202F\u00A0 ]?(AM|PM)\]\s+(.*)$/i;
+      const effectiveProgress = data.progressTimestamp || "";
+      const parsedAll = parseChat(content);
       let lastTsMs = 0;
-      for (const line of lines) {
-        const m = line.match(re);
-        if (!m) continue;
-        const tsStr = `${m[1]}, ${m[2]} ${m[3].toUpperCase()}`;
-        const ms = parseTimestampToMs(tsStr);
+      for (const msg of parsedAll) {
+        const ms = parseTimestampToMs(msg.timestamp);
         if (ms > lastTsMs) lastTsMs = ms;
       }
       const progressMs = parseTimestampToMs(effectiveProgress);
@@ -214,32 +229,68 @@ export default function UploadModal({ open, onClose }) {
           senderMap[entry.sender] = anchors[idx] || entry.sender;
       });
 
-      // Build first batch of 50 messages after progressTimestamp
-      const batch = [];
-      for (const line of lines) {
-        const m = line.match(re);
-        if (!m) continue;
-        const tsStr = `${m[1]}, ${m[2]} ${m[3].toUpperCase()}`;
-        const ms = parseTimestampToMs(tsStr);
+      // Build the full list of eligible messages (> progress, non-skippable)
+      const eligible = [];
+      for (const msg of parsedAll) {
+        const ms = parseTimestampToMs(msg.timestamp);
         if (ms <= progressMs) continue;
-        const rest = m[4];
-        const colonIdx = rest.indexOf(": ");
-        const sender = colonIdx >= 0 ? rest.slice(0, colonIdx).trim() : "";
-        const text =
-          colonIdx >= 0 ? rest.slice(colonIdx + 2).trim() : rest.trim();
-        if (isSkippable(text)) continue;
-        const mappedSender = senderMap[sender] || sender;
-        batch.push({ timestamp: tsStr, sender: mappedSender, text });
-        if (batch.length >= 50) break;
+        if (isSkippable(msg.text)) continue;
+        const mappedSender = senderMap[msg.sender] || msg.sender;
+        eligible.push({
+          timestamp: msg.timestamp,
+          sender: mappedSender,
+          text: msg.text,
+        });
       }
 
-      console.log("firstBatch:", batch);
-      onClose && onClose();
+      // Initialize progress UI
+      const totalMessages = eligible.length;
+      const totalBatches = Math.ceil(totalMessages / 50) || 0;
+      setShowProgress(true);
+      setProgress({
+        processedMessages: 0,
+        totalMessages,
+        processedBatches: 0,
+        totalBatches,
+        lastTimestamp: "",
+      });
+
+      // Send batches sequentially
+      let idx = 0;
+      while (idx < eligible.length) {
+        const batch = eligible.slice(idx, idx + 50);
+        try {
+          const r = await fetch("/api/extract-recs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ batch }),
+          });
+          const j = await r.json();
+          if (!j || j.ok !== true) {
+            setError("Failed to extract recommendations.");
+            break;
+          }
+          // Update progress
+          const processedMessages = Math.min(idx + batch.length, totalMessages);
+          const processedBatches = Math.ceil(processedMessages / 50);
+          setProgress((p) => ({
+            ...p,
+            processedMessages,
+            processedBatches,
+            lastTimestamp: j.progressTimestamp || p.lastTimestamp,
+          }));
+          idx += batch.length;
+        } catch (e) {
+          setError("Extraction service error.");
+          break;
+        }
+      }
     } catch (e) {
       console.error("Unzip/validation error", e);
       setError("Failed to read ZIP. Please try another file.");
     } finally {
-      setIsUploading(false);
+      // Keep button as Processing… while progress is visible; allow close via Close button
+      if (!showProgress) setIsUploading(false);
     }
   };
 
@@ -338,6 +389,21 @@ export default function UploadModal({ open, onClose }) {
               </button>
               <p className="text-xs text-gray-400">ZIP only. Max 10 MB.</p>
             </div>
+          ) : showProgress ? (
+            <div className="rounded-lg border border-white/10 bg-black/40 p-4 min-h-32">
+              <p className="text-sm text-gray-100">Processing…</p>
+              <p className="mt-1 text-xs text-gray-400">
+                {progress.processedMessages} / {progress.totalMessages} messages
+                {progress.totalBatches > 0
+                  ? ` • Batch ${progress.processedBatches}/${progress.totalBatches}`
+                  : ""}
+              </p>
+              {progress.lastTimestamp ? (
+                <p className="mt-1 text-xs text-gray-500">
+                  Last timestamp: {progress.lastTimestamp}
+                </p>
+              ) : null}
+            </div>
           ) : (
             <div className="rounded-lg border border-white/10 bg-black/40 p-4 min-h-32 flex flex-col justify-center">
               <p className="text-sm text-gray-100 break-words">
@@ -372,7 +438,7 @@ export default function UploadModal({ open, onClose }) {
             onClick={onClose}
             className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-gray-200 hover:bg-white/5"
           >
-            Cancel
+            {showProgress ? "Close" : "Cancel"}
           </button>
           <button
             type="button"
@@ -384,7 +450,7 @@ export default function UploadModal({ open, onClose }) {
                 : "bg-blue-600 text-white hover:bg-blue-500"
             }`}
           >
-            {isUploading ? "Uploading…" : "Upload"}
+            {showProgress || isUploading ? "Processing…" : "Upload"}
           </button>
         </div>
       </div>
