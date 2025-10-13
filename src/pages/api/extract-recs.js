@@ -69,7 +69,6 @@ async function extractWithLLM(batch) {
   const result = await client.responses.create({
     model: OPENAI_MODEL,
     input: `${EXTRACTION_PROMPT}\n\nMessages (JSON):\n${JSON.stringify(batch)}`,
-    reasoning: { effort: "medium" },
   });
 
   const rawResponse = result?.output_text || "[]";
