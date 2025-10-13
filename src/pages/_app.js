@@ -23,8 +23,28 @@ export default function App({ Component, pageProps }) {
         <title>Mentions from group chat</title>
         <meta
           name="description"
-          content="Aggregate and browse media recommendations from your group chat"
+          content="All your media recommendations from your group chat in one place"
         />
+
+        {/* Open Graph / Social Media */}
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="Mentions" />
+        <meta
+          property="og:description"
+          content="All your media recommendations from your group chat in one place"
+        />
+        <meta property="og:image" content="/og.png" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+
+        {/* Twitter */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Mentions" />
+        <meta
+          name="twitter:description"
+          content="All your media recommendations from your group chat in one place"
+        />
+        <meta name="twitter:image" content="/og.png" />
       </Head>
       <div
         className={`${geistSans.variable} ${geistMono.variable} font-sans max-w-4xl mx-auto`}
