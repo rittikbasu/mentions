@@ -4,6 +4,42 @@ export function normalizeTimestampString(input) {
     .trim();
 }
 
+export function parseWhatsAppTimestamp(timestamp) {
+  try {
+    const normalized = normalizeTimestampString(timestamp);
+    const match = normalized.match(
+      /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+(AM|PM)$/i
+    );
+    if (!match) return null;
+
+    const [, day, month, year, hours, minutes, seconds, meridiem] = match;
+
+    let fullYear = parseInt(year, 10);
+    if (fullYear < 100) {
+      fullYear += fullYear < 50 ? 2000 : 1900;
+    }
+
+    let hour24 = parseInt(hours, 10);
+    const isAM = meridiem.toUpperCase() === "AM";
+    if (hour24 === 12) {
+      hour24 = isAM ? 0 : 12;
+    } else if (!isAM) {
+      hour24 += 12;
+    }
+
+    return new Date(
+      fullYear,
+      parseInt(month, 10) - 1,
+      parseInt(day, 10),
+      hour24,
+      parseInt(minutes, 10),
+      parseInt(seconds, 10)
+    );
+  } catch (e) {
+    return null;
+  }
+}
+
 export function parseChat(text) {
   const lines = String(text || "").split(/\r?\n/);
   const re =
@@ -51,18 +87,54 @@ export function isSkippable(text) {
   return false;
 }
 
-export function extractMessagesByTimestamps(text, targetTimestamps) {
-  const normalizedTargets = new Set(
-    (targetTimestamps || []).map((t) => normalizeTimestampString(t))
-  );
+export function extractMessagesByTimestamps(
+  text,
+  targetTimestamps,
+  toleranceSeconds = 2
+) {
   const result = {};
   const messages = parseChat(text);
-  for (const msg of messages) {
-    const key = normalizeTimestampString(msg.timestamp);
-    if (normalizedTargets.has(key) && !result[key]) {
-      result[key] = { sender: msg.sender, text: msg.text };
+
+  // for each target timestamp find a matching message within tolerance
+  for (const targetTs of targetTimestamps || []) {
+    const normalizedTarget = normalizeTimestampString(targetTs);
+
+    // first try exact match
+    const exactMatch = messages.find(
+      (msg) => normalizeTimestampString(msg.timestamp) === normalizedTarget
+    );
+
+    if (exactMatch) {
+      result[normalizedTarget] = {
+        sender: exactMatch.sender,
+        text: exactMatch.text,
+      };
+      continue;
+    }
+
+    // try fuzzy match within tolerance window and choose the closest by time
+    let best = null;
+    let bestDiff = Infinity;
+    const targetDate = parseWhatsAppTimestamp(targetTs);
+    if (targetDate) {
+      for (const msg of messages) {
+        const msgDate = parseWhatsAppTimestamp(msg.timestamp);
+        if (!msgDate) continue;
+        const diffSec =
+          Math.abs(msgDate.getTime() - targetDate.getTime()) / 1000;
+        if (diffSec <= toleranceSeconds && diffSec < bestDiff) {
+          best = msg;
+          bestDiff = diffSec;
+          if (bestDiff === 0) break; // exact time match found
+        }
+      }
+    }
+
+    if (best) {
+      result[normalizedTarget] = { sender: best.sender, text: best.text };
     }
   }
+
   return result;
 }
 
@@ -74,8 +146,6 @@ export async function sha256Hex(input) {
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 }
-
-// Metadata helpers (used by extract-recs API)
 
 export function extractUrl(str) {
   const m = String(str || "").match(/https?:\/\/\S+/i);

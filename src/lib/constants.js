@@ -25,6 +25,8 @@ export const TOKEN_COSTS = {
   OUTPUT_PER_MILLION: 2.0,
 };
 
+export const TIMESTAMP_TOLERANCE_SECONDS = 2;
+
 export const EXTRACTION_PROMPT = `Core task: Extract media recommendations from Hinglish chat.
 Output: Strict JSON array [{title, type, sender, timestamp}]
 

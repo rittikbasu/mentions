@@ -6,12 +6,14 @@ import {
   parseChat,
   isSkippable,
   extractMessagesByTimestamps,
+  parseWhatsAppTimestamp,
 } from "@/lib/utils";
 import {
   ANCHOR_TIMESTAMPS,
   ANCHOR_LABELS,
   BATCH_SIZE,
   TOKEN_COSTS,
+  TIMESTAMP_TOLERANCE_SECONDS,
 } from "@/lib/constants";
 
 export default function UploadModal({ open, onClose, onComplete }) {
@@ -143,7 +145,11 @@ export default function UploadModal({ open, onClose, onComplete }) {
         return;
       }
       const content = strFromU8(zipEntries[chatEntryName]);
-      const found = extractMessagesByTimestamps(content, ANCHOR_TIMESTAMPS);
+      const found = extractMessagesByTimestamps(
+        content,
+        ANCHOR_TIMESTAMPS,
+        TIMESTAMP_TOLERANCE_SECONDS
+      );
       const textsInOrder = [];
       for (const ts of ANCHOR_TIMESTAMPS) {
         const key = normalizeTimestampString(ts);
@@ -192,10 +198,37 @@ export default function UploadModal({ open, onClose, onComplete }) {
       const progressTimestamp = data.progressTimestamp;
       if (progressTimestamp) {
         const normalizedProgress = normalizeTimestampString(progressTimestamp);
-        const progressIdx = messages.findIndex(
+        let progressIdx = messages.findIndex(
           (m) => m.normalizedTimestamp === normalizedProgress
         );
-        startIdx = progressIdx >= 0 ? progressIdx + 1 : 0;
+        if (progressIdx < 0) {
+          const targetDate = parseWhatsAppTimestamp(progressTimestamp);
+          if (targetDate) {
+            let bestIdx = -1;
+            let bestDiff = Infinity;
+            for (let i = 0; i < messages.length; i++) {
+              const msgDate = parseWhatsAppTimestamp(messages[i].timestamp);
+              if (!msgDate) continue;
+              const diffSec =
+                Math.abs(msgDate.getTime() - targetDate.getTime()) / 1000;
+              if (
+                diffSec <= TIMESTAMP_TOLERANCE_SECONDS &&
+                diffSec < bestDiff
+              ) {
+                bestDiff = diffSec;
+                bestIdx = i;
+                if (bestDiff === 0) break;
+              }
+            }
+            progressIdx = bestIdx;
+          }
+        }
+        if (progressIdx < 0) {
+          setError("Incompatible chat export. Please contact the developer.");
+          setIsUploading(false);
+          return;
+        }
+        startIdx = progressIdx + 1;
       }
 
       if (startIdx >= messages.length) {
