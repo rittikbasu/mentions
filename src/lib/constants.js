@@ -33,7 +33,7 @@ Output: Strict JSON array [{title, type, sender, timestamp}]
 Types: book | movie | tv_show | song | youtube
 
 Link handling (highest priority):
-- If the message contains a streaming/media URL (Spotify, Apple Music, YouTube, SoundCloud), set "title" to the URL exactly as it appears.
+- If the message contains a URL that fits one of our types (Spotify, Apple Music, YouTube, SoundCloud, Netlfix), set "title" to the URL exactly as it appears.
 - Do NOT replace a URL with track/movie names or artists. Never infer names when a URL is present.
 - If both text and a URL exist in the same message, prefer the URL.
 
