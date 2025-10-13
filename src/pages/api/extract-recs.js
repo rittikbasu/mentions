@@ -105,10 +105,10 @@ async function enrichRecommendations(items) {
       image_url = ogData.image || null;
     } else if (type === "movie" || type === "tv_show") {
       const tmdbData = await fetchTmdbMetadata(title, type);
-      if (tmdbData) {
-        title = tmdbData.title;
-        image_url = tmdbData.image_url;
-      }
+      if (!tmdbData) return null;
+
+      title = tmdbData.title;
+      image_url = tmdbData.image_url;
     }
 
     return {
