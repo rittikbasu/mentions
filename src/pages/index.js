@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import UploadModal from "@/components/UploadModal";
 import Image from "next/image";
 import { getPocketBaseClient, getMetaValue } from "@/lib/pocketbase";
+import { COLLECTION_NAMES } from "@/lib/constants";
 
 const TYPE_OPTIONS = [
   { label: "Movies", value: "movie" },
@@ -59,6 +61,7 @@ function Avatar({ sender }) {
 }
 
 export default function Home({ items, lastUpdated }) {
+  const router = useRouter();
   const [activeType, setActiveType] = useState("");
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
@@ -71,6 +74,11 @@ export default function Home({ items, lastUpdated }) {
 
     return { list: filtered };
   }, [items, activeType]);
+
+  const handleUploadComplete = () => {
+    setIsUploadOpen(false);
+    router.reload();
+  };
 
   return (
     <div className="font-sans min-h-screen">
@@ -120,7 +128,7 @@ export default function Home({ items, lastUpdated }) {
                     }}
                     className={`shrink-0 rounded-md border px-2 py-1 text-sm transition-colors  ${
                       isActive
-                        ? "bg-pink-600 text-white border-pink-600"
+                        ? "bg-blue-600 text-white border-blue-600"
                         : "bg-black/40 border-white/10 text-gray-100 hover:bg-white/5"
                     }`}
                     aria-pressed={isActive}
@@ -168,7 +176,7 @@ export default function Home({ items, lastUpdated }) {
                 />
               </svg>
               by{" "}
-              <span className="font-medium text-gray-300 group-hover:text-pink-400 transition-colors">
+              <span className="font-medium text-gray-300 group-hover:text-blue-400 transition-colors">
                 rittik
               </span>
             </a>
@@ -206,7 +214,7 @@ export default function Home({ items, lastUpdated }) {
                       <span className="text-xs text-gray-500">No image</span>
                     )}
                     <span
-                      className={`absolute bottom-0 left-0 items-center rounded-tr-lg border-t border-r px-2.5 py-0.5 text-sm font-medium backdrop-blur-md ${getTypeBadgeClasses(
+                      className={`absolute bottom-0 left-0 items-center border-t w-full px-2.5 py-0.5 text-sm text-center font-medium backdrop-blur-xs ${getTypeBadgeClasses(
                         item.type
                       )}`}
                     >
@@ -283,7 +291,11 @@ export default function Home({ items, lastUpdated }) {
           </section>
         )}
       </main>
-      <UploadModal open={isUploadOpen} onClose={() => setIsUploadOpen(false)} />
+      <UploadModal
+        open={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
+        onComplete={handleUploadComplete}
+      />
     </div>
   );
 }
@@ -295,7 +307,7 @@ export async function getStaticProps() {
     const pb = await getPocketBaseClient();
 
     const records = await pb
-      .collection("chatrex_data")
+      .collection(COLLECTION_NAMES.DATA)
       .getFullList({ sort: "-created", batch: 200 });
 
     items = records.map((r) => ({
@@ -321,6 +333,6 @@ export async function getStaticProps() {
 
   return {
     props: { items, lastUpdated },
-    revalidate: 3600,
+    revalidate: 1,
   };
 }
