@@ -1,113 +1,69 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { unzipSync, strFromU8 } from "fflate";
+import {
+  sha256Hex,
+  normalizeTimestampString,
+  parseChat,
+  isSkippable,
+  extractMessagesByTimestamps,
+} from "@/lib/utils";
+import {
+  ANCHOR_TIMESTAMPS,
+  ANCHOR_LABELS,
+  BATCH_SIZE,
+  TOKEN_COSTS,
+} from "@/lib/constants";
 
-function normalizeTimestampString(input) {
-  return String(input || "")
-    .replace(/[\u202F\u00A0]/g, " ")
-    .trim();
-}
-
-function extractMessagesByTimestamps(text, targetTimestamps) {
-  const normalizedTargets = new Set(
-    (targetTimestamps || []).map((t) => normalizeTimestampString(t))
-  );
-  const result = {};
-  const messages = parseChat(text);
-  for (const msg of messages) {
-    const key = normalizeTimestampString(msg.timestamp);
-    if (normalizedTargets.has(key) && !result[key]) {
-      result[key] = { sender: msg.sender, text: msg.text };
-    }
-  }
-  return result;
-}
-
-async function sha256Hex(input) {
-  const data = new TextEncoder().encode(input);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function parseChat(text) {
-  const lines = String(text || "").split(/\r?\n/);
-  const re =
-    /^\[(\d{1,2}\/\d{1,2}\/\d{2,4}),\s+(\d{1,2}:\d{2}:\d{2})[\u202F\u00A0 ]?(AM|PM)\]\s+(.*)$/i;
-  const out = [];
-  let current = null;
-
-  for (const rawLine of lines) {
-    const m = rawLine.match(re);
-    if (m) {
-      if (current) out.push(current);
-      const tsStr = `${m[1]}, ${m[2]} ${m[3].toUpperCase()}`;
-      const rest = m[4];
-      const colonIdx = rest.indexOf(": ");
-      const sender = colonIdx >= 0 ? rest.slice(0, colonIdx).trim() : "";
-      const body =
-        colonIdx >= 0 ? rest.slice(colonIdx + 2).trim() : rest.trim();
-      current = { timestamp: tsStr, sender, text: body };
-    } else if (current) {
-      const line = rawLine.trim();
-      if (line.length > 0) current.text += `\n${line}`;
-    }
-  }
-  if (current) out.push(current);
-  return out;
-}
-
-function parseTimestampToMs(s) {
-  const m = String(s || "").match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2}):(\d{2})[\u202F\u00A0 ]?(AM|PM)$/i
-  );
-  if (!m) return 0;
-  const day = Number(m[1]);
-  const month = Number(m[2]);
-  let year = Number(m[3]);
-  if (year < 100) year += year < 70 ? 2000 : 1900;
-  let hour = Number(m[4]);
-  const minute = Number(m[5]);
-  const second = Number(m[6]);
-  const ampm = m[7].toUpperCase();
-  if (ampm === "AM" && hour === 12) hour = 0;
-  if (ampm === "PM" && hour !== 12) hour += 12;
-  return new Date(year, month - 1, day, hour, minute, second).getTime();
-}
-
-function isSkippable(text) {
-  if (!text) return true;
-  const lc = String(text).toLowerCase();
-  if (lc.includes("messages and calls are end-to-end encrypted")) return true;
-  if (lc.includes("created this group")) return true;
-  if (lc.includes("changed the subject")) return true;
-  if (lc.includes("changed this group's icon")) return true;
-  if (lc.includes("deleted this message")) return true;
-  if (lc.includes("you deleted this message")) return true;
-  if (lc.includes("missed voice call")) return true;
-  if (lc.includes("missed video call")) return true;
-  if (
-    /^[\u200e\u200f]?(image|video|gif|sticker|audio|document) omitted/i.test(
-      text
-    )
-  )
-    return true;
-  return false;
-}
-
-export default function UploadModal({ open, onClose }) {
+export default function UploadModal({ open, onClose, onComplete }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState("");
   const [showProgress, setShowProgress] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [canRetry, setCanRetry] = useState(false);
   const [progress, setProgress] = useState({
     processedMessages: 0,
     totalMessages: 0,
     processedBatches: 0,
     totalBatches: 0,
-    lastTimestamp: "",
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
   });
   const fileInputRef = useRef(null);
-  const dialogRef = useRef(null);
+
+  const handleClose = useCallback(() => {
+    if (isComplete) {
+      setSelectedFile(null);
+      setIsUploading(false);
+      setError("");
+      setShowProgress(false);
+      setIsComplete(false);
+      setProgress({
+        processedMessages: 0,
+        totalMessages: 0,
+        processedBatches: 0,
+        totalBatches: 0,
+        totalPromptTokens: 0,
+        totalCompletionTokens: 0,
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (onComplete) {
+        onComplete();
+      } else {
+        onClose();
+      }
+      return;
+    }
+
+    if (!showProgress) {
+      setSelectedFile(null);
+      setIsUploading(false);
+      setError("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+
+    onClose();
+  }, [isComplete, showProgress, onComplete, onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -140,157 +96,185 @@ export default function UploadModal({ open, onClose }) {
       html.style.overflow = prev.htmlOverflow;
       window.scrollTo(0, scrollY);
     };
-  }, [open]);
+  }, [open, handleClose]);
 
   if (!open) return null;
 
   const handleBrowse = () => {
-    if (fileInputRef.current) fileInputRef.current.click();
+    fileInputRef.current?.click();
   };
+
   const handleInputChange = (e) => {
-    const files = Array.from(e.target.files || []);
-    setSelectedFile(files[0] || null);
+    setSelectedFile(e.target.files?.[0] || null);
     setError("");
+    setCanRetry(false);
   };
+
   const removeFile = () => {
     setSelectedFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
     setError("");
+    setCanRetry(false);
   };
+
   const startUpload = async () => {
     if (!selectedFile || isUploading) return;
+
+    setCanRetry(false);
+
+    const maxSize = 1 * 1024 * 1024;
+    if (selectedFile.size > maxSize) {
+      setError("File size exceeds 1 MB limit.");
+      return;
+    }
+
     setIsUploading(true);
     setError("");
+
     try {
       const buf = await selectedFile.arrayBuffer();
       const zipEntries = unzipSync(new Uint8Array(buf));
-      // find *_chat.txt (case-insensitive)
       const chatEntryName = Object.keys(zipEntries).find((name) =>
         /_chat\.txt$/i.test(name)
       );
       if (!chatEntryName) {
-        setError("ZIP does not contain a _chat.txt file.");
+        setError("ZIP does not contain a chat export.");
+        setIsUploading(false);
         return;
       }
       const content = strFromU8(zipEntries[chatEntryName]);
-      const targets = [
-        "02/12/23, 7:27:49 AM",
-        "18/12/23, 2:24:03 PM",
-        "09/07/24, 2:20:25 PM",
-        "18/08/24, 10:57:29 AM",
-      ];
-      const found = extractMessagesByTimestamps(content, targets);
+      const found = extractMessagesByTimestamps(content, ANCHOR_TIMESTAMPS);
       const textsInOrder = [];
-      for (const ts of targets) {
+      for (const ts of ANCHOR_TIMESTAMPS) {
         const key = normalizeTimestampString(ts);
-        if (!Object.prototype.hasOwnProperty.call(found, key)) {
+        if (!found[key]) {
           setError("This is the wrong file. Please upload the correct one.");
+          setIsUploading(false);
           return;
         }
-        const entry = found[key] || { sender: "", text: "" };
-        textsInOrder.push(entry.text || "");
+        textsInOrder.push(found[key].text || "");
       }
-      const combined = textsInOrder.join("\n");
-      const hash = await sha256Hex(combined);
+      const hash = await sha256Hex(textsInOrder.join("\n"));
 
-      // Verify with server
+      // verify with server and get progress timestamp
       const resp = await fetch("/api/verify-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hash }),
       });
       const data = await resp.json().catch(() => ({ ok: false }));
-      if (!data || data.ok !== true) {
+      if (!data?.ok) {
         setError("Chat export didn't match the expected group.");
+        setIsUploading(false);
         return;
       }
 
-      // Progress check: ensure last message timestamp > progressTimestamp
-      const effectiveProgress = data.progressTimestamp || "";
-      const parsedAll = parseChat(content);
-      let lastTsMs = 0;
-      for (const msg of parsedAll) {
-        const ms = parseTimestampToMs(msg.timestamp);
-        if (ms > lastTsMs) lastTsMs = ms;
-      }
-      const progressMs = parseTimestampToMs(effectiveProgress);
-      if (!lastTsMs || lastTsMs <= progressMs) {
-        setError("Already up to date — no new messages to process.");
-        return;
-      }
-
-      // Participant mapping based on the 4 anchor timestamps
       const senderMap = {};
-      const anchors = ["A", "D", "P", "R"];
-      targets.forEach((ts, idx) => {
-        const key = normalizeTimestampString(ts);
-        const entry = found[key];
-        if (entry && entry.sender)
-          senderMap[entry.sender] = anchors[idx] || entry.sender;
+      ANCHOR_TIMESTAMPS.forEach((ts, idx) => {
+        const entry = found[normalizeTimestampString(ts)];
+        if (entry?.sender) {
+          senderMap[entry.sender] = ANCHOR_LABELS[idx];
+        }
       });
 
-      // Build the full list of eligible messages (> progress, non-skippable)
-      const eligible = [];
-      for (const msg of parsedAll) {
-        const ms = parseTimestampToMs(msg.timestamp);
-        if (ms <= progressMs) continue;
-        if (isSkippable(msg.text)) continue;
-        const mappedSender = senderMap[msg.sender] || msg.sender;
-        eligible.push({
+      const allParsed = parseChat(content);
+      const messages = allParsed
+        .filter((msg) => !isSkippable(msg.text))
+        .map((msg) => ({
           timestamp: msg.timestamp,
-          sender: mappedSender,
+          normalizedTimestamp: normalizeTimestampString(msg.timestamp),
+          sender: senderMap[msg.sender] || msg.sender,
           text: msg.text,
-        });
+        }));
+
+      // find starting index after progress timestamp
+      let startIdx = 0;
+      const progressTimestamp = data.progressTimestamp;
+      if (progressTimestamp) {
+        const normalizedProgress = normalizeTimestampString(progressTimestamp);
+        const progressIdx = messages.findIndex(
+          (m) => m.normalizedTimestamp === normalizedProgress
+        );
+        startIdx = progressIdx >= 0 ? progressIdx + 1 : 0;
       }
 
-      // Initialize progress UI
-      const totalMessages = eligible.length;
-      const totalBatches = Math.ceil(totalMessages / 50) || 0;
+      if (startIdx >= messages.length) {
+        setError("Already up to date!");
+        setIsUploading(false);
+        return;
+      }
+
+      const totalMessages = messages.length - startIdx;
+      const totalBatches = Math.ceil(totalMessages / BATCH_SIZE);
       setShowProgress(true);
       setProgress({
         processedMessages: 0,
         totalMessages,
         processedBatches: 0,
         totalBatches,
-        lastTimestamp: "",
+        totalPromptTokens: 0,
+        totalCompletionTokens: 0,
       });
 
-      // Send batches sequentially
-      let idx = 0;
-      while (idx < eligible.length) {
-        const batch = eligible.slice(idx, idx + 50);
+      let idx = startIdx;
+      let processedCount = 0;
+      let hadError = false;
+      while (idx < messages.length) {
+        const batch = messages.slice(idx, idx + BATCH_SIZE);
         try {
-          const r = await fetch("/api/extract-recs", {
+          const res = await fetch("/api/extract-recs", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ batch }),
           });
-          const j = await r.json();
-          if (!j || j.ok !== true) {
+          const result = await res.json();
+          if (!result?.ok) {
             setError("Failed to extract recommendations.");
+            setCanRetry(true);
+            hadError = true;
             break;
           }
-          // Update progress
-          const processedMessages = Math.min(idx + batch.length, totalMessages);
-          const processedBatches = Math.ceil(processedMessages / 50);
+
+          processedCount += batch.length;
           setProgress((p) => ({
             ...p,
-            processedMessages,
-            processedBatches,
-            lastTimestamp: j.progressTimestamp || p.lastTimestamp,
+            processedMessages: processedCount,
+            processedBatches: Math.ceil(processedCount / BATCH_SIZE),
+            totalPromptTokens:
+              p.totalPromptTokens + (result.usage?.prompt_tokens || 0),
+            totalCompletionTokens:
+              p.totalCompletionTokens + (result.usage?.completion_tokens || 0),
           }));
-          idx += batch.length;
+
+          // use server timestamp if available, else continue
+          if (result.progressTimestamp) {
+            const normalizedCursor = normalizeTimestampString(
+              result.progressTimestamp
+            );
+            const cursorIdx = messages.findIndex(
+              (m, i) => i >= idx && m.normalizedTimestamp === normalizedCursor
+            );
+            idx = cursorIdx >= 0 ? cursorIdx + 1 : idx + BATCH_SIZE;
+          } else {
+            idx += BATCH_SIZE;
+          }
         } catch (e) {
-          setError("Extraction service error.");
+          setError("Sorry there was a server error. Please try again.");
+          setIsUploading(false);
+          setCanRetry(true);
+          hadError = true;
           break;
         }
       }
+
+      if (!hadError) {
+        setIsComplete(true);
+      }
+      setIsUploading(false);
     } catch (e) {
       console.error("Unzip/validation error", e);
       setError("Failed to read ZIP. Please try another file.");
-    } finally {
-      // Keep button as Processing… while progress is visible; allow close via Close button
-      if (!showProgress) setIsUploading(false);
+      setIsUploading(false);
     }
   };
 
@@ -300,27 +284,18 @@ export default function UploadModal({ open, onClose }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="upload-title"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className="relative w-full max-w-lg mx-4 rounded-xl border border-white/10 bg-black/80 shadow-xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         tabIndex={-1}
-        ref={dialogRef}
       >
-        <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-white/10">
           <h2 id="upload-title" className="text-lg font-semibold">
             Upload chat
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-gray-300 hover:bg-white/5"
-            aria-label="Close"
-          >
-            ✕
-          </button>
         </div>
 
         <div className="p-5">
@@ -347,7 +322,6 @@ export default function UploadModal({ open, onClose }) {
               </ol>
             </nav>
           </div>
-          {/* Hidden file input kept always mounted so Change works */}
           <input
             ref={fileInputRef}
             type="file"
@@ -356,13 +330,14 @@ export default function UploadModal({ open, onClose }) {
             onChange={handleInputChange}
           />
 
-          {error ? (
+          {error && (
             <div className="mb-4 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
               {error}
             </div>
-          ) : null}
+          )}
+
           {!selectedFile ? (
-            <div className="rounded-lg border border-white/10 bg-black/40 p-6 text-center min-h-32 flex flex-col items-center justify-center gap-2">
+            <div className="rounded-lg border border-white/10 bg-black/40 p-6 text-center min-h-36 flex flex-col items-center justify-center gap-2">
               <button
                 type="button"
                 onClick={handleBrowse}
@@ -387,25 +362,74 @@ export default function UploadModal({ open, onClose }) {
                 </svg>
                 Choose .zip file
               </button>
-              <p className="text-xs text-gray-400">ZIP only. Max 10 MB.</p>
+              <p className="text-xs text-gray-400">ZIP only. Max 1 MB.</p>
             </div>
           ) : showProgress ? (
-            <div className="rounded-lg border border-white/10 bg-black/40 p-4 min-h-32">
-              <p className="text-sm text-gray-100">Processing…</p>
-              <p className="mt-1 text-xs text-gray-400">
-                {progress.processedMessages} / {progress.totalMessages} messages
-                {progress.totalBatches > 0
-                  ? ` • Batch ${progress.processedBatches}/${progress.totalBatches}`
-                  : ""}
-              </p>
-              {progress.lastTimestamp ? (
-                <p className="mt-1 text-xs text-gray-500">
-                  Last timestamp: {progress.lastTimestamp}
+            <>
+              <div className="rounded-lg border border-white/10 bg-black/40 p-5 min-h-36">
+                <div className="flex items-center justify-start mb-3">
+                  <p className="text-sm font-medium text-gray-100">
+                    {isComplete
+                      ? "Processing complete"
+                      : error
+                      ? "Processing failed"
+                      : "Processing messages"}
+                  </p>
+                </div>
+
+                <div className="relative h-2 bg-white/5 rounded-full overflow-hidden mb-4">
+                  <div
+                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-300 ease-out rounded-full"
+                    style={{
+                      width: `${
+                        progress.totalMessages > 0
+                          ? (progress.processedMessages /
+                              progress.totalMessages) *
+                            100
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-xs mb-2">
+                  <span className="text-gray-300 font-medium">
+                    Messages {progress.processedMessages} /{" "}
+                    {progress.totalMessages}
+                  </span>
+                  <span className="text-gray-400">
+                    Batch {progress.processedBatches}/{progress.totalBatches}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs pt-2">
+                  <span className="text-gray-300 font-medium">
+                    Tokens used{" "}
+                    {(
+                      progress.totalPromptTokens +
+                      progress.totalCompletionTokens
+                    ).toLocaleString()}
+                  </span>
+                  <span className="text-green-400 font-semibold">
+                    $
+                    {(
+                      (progress.totalPromptTokens / 1_000_000) *
+                        TOKEN_COSTS.INPUT_PER_MILLION +
+                      (progress.totalCompletionTokens / 1_000_000) *
+                        TOKEN_COSTS.OUTPUT_PER_MILLION
+                    ).toFixed(4)}
+                  </span>
+                </div>
+              </div>
+              {!isComplete && (
+                <p className="mt-2 text-[11px] text-gray-500">
+                  You can close this box and continue to browse the mentions.
+                  The processing will continue in the background.
                 </p>
-              ) : null}
-            </div>
+              )}
+            </>
           ) : (
-            <div className="rounded-lg border border-white/10 bg-black/40 p-4 min-h-32 flex flex-col justify-center">
+            <div className="rounded-lg border border-white/10 bg-black/40 p-4 min-h-36 flex flex-col justify-center">
               <p className="text-sm text-gray-100 break-words">
                 {selectedFile.name}
               </p>
@@ -435,22 +459,34 @@ export default function UploadModal({ open, onClose }) {
         <div className="px-5 py-4 border-t border-white/10 flex justify-end gap-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-gray-200 hover:bg-white/5"
           >
             {showProgress ? "Close" : "Cancel"}
           </button>
           <button
             type="button"
-            disabled={!selectedFile || isUploading}
-            onClick={startUpload}
+            disabled={
+              !selectedFile ||
+              (isUploading && !isComplete) ||
+              (!!error && !canRetry)
+            }
+            onClick={isComplete ? handleClose : startUpload}
             className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-              !selectedFile || isUploading
+              !selectedFile ||
+              (isUploading && !isComplete) ||
+              (!!error && !canRetry)
                 ? "bg-blue-600/50 text-white/70"
                 : "bg-blue-600 text-white hover:bg-blue-500"
             }`}
           >
-            {showProgress || isUploading ? "Processing…" : "Upload"}
+            {isComplete
+              ? "Done"
+              : canRetry
+              ? "Retry"
+              : showProgress || isUploading
+              ? "Processing…"
+              : "Upload"}
           </button>
         </div>
       </div>
