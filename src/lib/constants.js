@@ -1,6 +1,6 @@
 export const COLLECTION_NAMES = {
-  DATA: "chatrex_data_test",
-  META: "chatrex_meta_test",
+  DATA: "chatrex_data",
+  META: "chatrex_meta",
 };
 
 export const ANCHOR_TIMESTAMPS = [
