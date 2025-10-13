@@ -187,8 +187,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
       const messages = allParsed
         .filter((msg) => !isSkippable(msg.text))
         .map((msg) => ({
-          timestamp: msg.timestamp,
-          normalizedTimestamp: normalizeTimestampString(msg.timestamp),
+          timestamp: normalizeTimestampString(msg.timestamp),
           sender: senderMap[msg.sender] || msg.sender,
           text: msg.text,
         }));
@@ -199,7 +198,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
       if (progressTimestamp) {
         const normalizedProgress = normalizeTimestampString(progressTimestamp);
         let progressIdx = messages.findIndex(
-          (m) => m.normalizedTimestamp === normalizedProgress
+          (m) => m.timestamp === normalizedProgress
         );
         if (progressIdx < 0) {
           const targetDate = parseWhatsAppTimestamp(progressTimestamp);
@@ -285,7 +284,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
               result.progressTimestamp
             );
             const cursorIdx = messages.findIndex(
-              (m, i) => i >= idx && m.normalizedTimestamp === normalizedCursor
+              (m, i) => i >= idx && m.timestamp === normalizedCursor
             );
             idx = cursorIdx >= 0 ? cursorIdx + 1 : idx + BATCH_SIZE;
           } else {
