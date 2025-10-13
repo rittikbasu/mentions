@@ -1,4 +1,5 @@
 import PocketBase from "pocketbase";
+import { COLLECTION_NAMES } from "./constants";
 
 export async function getPocketBaseClient() {
   const { PB_URL, PB_EMAIL, PB_PASSWORD } = process.env;
@@ -12,8 +13,12 @@ export async function getPocketBaseClient() {
 
 export async function getMetaValue(key) {
   const pb = await getPocketBaseClient();
-  const meta = await pb
-    .collection("chatrex_meta")
-    .getFirstListItem(`key = "${key}"`);
-  return meta && meta.value ? String(meta.value) : "";
+  try {
+    const meta = await pb
+      .collection(COLLECTION_NAMES.META)
+      .getFirstListItem(`key = "${key}"`);
+    return meta && meta.value ? String(meta.value) : "";
+  } catch (e) {
+    return "";
+  }
 }
