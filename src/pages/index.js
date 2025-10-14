@@ -157,6 +157,7 @@ export default function Home({ items, lastUpdated }) {
                     onClick={() => {
                       const next = isActive ? "" : t.value;
                       setActiveType(next);
+                      window.scrollTo({ top: 0, behavior: "instant" });
                     }}
                     className={`shrink-0 rounded-md border px-2 py-1 text-sm transition-colors  ${
                       isActive
