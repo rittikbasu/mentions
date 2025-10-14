@@ -1,5 +1,13 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/router";
+import {
+  Loader2,
+  Check,
+  Upload,
+  ArrowUpRight,
+  AlertCircle,
+} from "lucide-react";
+import BookCover from "@/components/BookCover";
 import UploadModal from "@/components/UploadModal";
 import Image from "next/image";
 import { getPocketBaseClient, getMetaValue } from "@/lib/pocketbase";
@@ -35,6 +43,30 @@ function formatTypeLabel(type) {
   return found ? found.label : type;
 }
 
+const BUTTON_STATES = {
+  idle: {
+    icon: Upload,
+    label: "Upload chat",
+    className: "border-black/10 bg-white text-gray-900",
+  },
+  processing: {
+    icon: Loader2,
+    label: "Processing",
+    className: "border-blue-600/20 bg-blue-50 text-blue-700",
+    iconClassName: "animate-spin",
+  },
+  complete: {
+    icon: Check,
+    label: "Complete",
+    className: "border-green-600/20 bg-green-50 text-green-700",
+  },
+  error: {
+    icon: AlertCircle,
+    label: "Error",
+    className: "border-red-600/20 bg-red-50 text-red-700",
+  },
+};
+
 function Avatar({ sender }) {
   const [failed, setFailed] = useState(false);
   const src = `/pfp/${sender}.jpg`;
@@ -64,6 +96,7 @@ export default function Home({ items, lastUpdated }) {
   const router = useRouter();
   const [activeType, setActiveType] = useState("");
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("idle"); // idle | processing | complete
 
   const computed = useMemo(() => {
     const filtered = items.filter((item) => {
@@ -77,8 +110,18 @@ export default function Home({ items, lastUpdated }) {
 
   const handleUploadComplete = () => {
     setIsUploadOpen(false);
+    setUploadStatus("idle");
     router.reload();
   };
+
+  const handleStatusChange = (status) => {
+    setUploadStatus(status);
+  };
+
+  const displayStatus =
+    isUploadOpen && uploadStatus !== "error" ? "processing" : uploadStatus;
+
+  const currentState = BUTTON_STATES[displayStatus];
 
   return (
     <div className="font-sans min-h-screen">
@@ -90,26 +133,15 @@ export default function Home({ items, lastUpdated }) {
               <button
                 type="button"
                 onClick={() => setIsUploadOpen(true)}
-                className="inline-flex items-center gap-2 rounded-md border border-black/10 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
+                className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors cursor-pointer ${currentState.className}`}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="lucide lucide-upload-icon"
-                  aria-hidden
-                >
-                  <path d="M12 3v12" />
-                  <path d="m17 8-5-5-5 5" />
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                </svg>
-                Upload chat
+                {(() => {
+                  const Icon = currentState.icon;
+                  return (
+                    <Icon size={16} className={currentState.iconClassName} />
+                  );
+                })()}
+                {currentState.label}
               </button>
             </div>
           </div>
@@ -210,6 +242,8 @@ export default function Home({ items, lastUpdated }) {
                         unoptimized
                         priority={false}
                       />
+                    ) : item.type === "book" ? (
+                      <BookCover title={item.title} />
                     ) : (
                       <span className="text-xs text-gray-500">No image</span>
                     )}
@@ -263,22 +297,7 @@ export default function Home({ items, lastUpdated }) {
                           aria-label={`Open link to ${item.title}`}
                         >
                           Open Link
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="lucide lucide-arrow-up-right-icon"
-                            aria-hidden
-                          >
-                            <path d="M7 7h10v10" />
-                            <path d="M7 17 17 7" />
-                          </svg>
+                          <ArrowUpRight size={16} />
                         </a>
                       ) : (
                         <span aria-hidden className="inline-block w-0 h-0" />
@@ -295,6 +314,7 @@ export default function Home({ items, lastUpdated }) {
         open={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
         onComplete={handleUploadComplete}
+        onStatusChange={handleStatusChange}
       />
     </div>
   );
