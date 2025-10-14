@@ -53,7 +53,7 @@ export default function BookCover({ title }) {
         }}
       />
 
-      <div className="relative z-10 flex h-full items-center justify-center px-2">
+      <div className="relative flex h-full items-center justify-center px-2">
         <h3
           className={`text-white font-serif ${fontSize} leading-tight text-center tracking-wide line-clamp-6`}
         >
