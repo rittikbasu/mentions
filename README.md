@@ -1,40 +1,116 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+# mentions
 
-## Getting Started
+a collection of all your book, movie, youtube, music and tv show mentions and recommendations from your whatsapp group chat in one place so nothing gets lost.
 
-First, run the development server:
+i built this because a friend suggested making an excel sheet to keep track of all our recs. but i did what a developer would do and spent 2 days to save 2 hours.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+<table>
+  <tr>
+    <td align="center">home ui</td>
+     <td align="center">upload ui</td>
+  </tr>
+  <tr>
+    <td><img src="https://ik.imagekit.io/zwcfsadeijm/mentions_landingui_3WwAN_prr.png" width=300 height=720></td>
+    <td><img src="https://ik.imagekit.io/zwcfsadeijm/mentions_uploadui_A4DHtZs94.png" width=300 height=720></td>
+  </tr>
+</table>
+
+## how it works
+
+- upload your whatsapp chat export (.zip).
+- to prevent uploads from non group members (site is authless) the server verifies the export by checking **4 random timestamps**: it hashes the messages at those timestamps and only accepts exports that produce the same hash. this makes sure only people with the real chat can upload.
+- the app extracts recs using gpt-5-mini and saves them to the database.
+- movie/tv posters are fetched from tmdb; links are enriched with opengraph metadata.
+- processing happens in batches of 50 messages, saves as it goes, and resumes from the last processed timestamp if anything fails.
+- you can also star your favourite recs in the ui and they are stored locally in the browser.
+
+## tech stack
+
+- next.js
+- tailwindcss
+- pocketbase
+
+## run locally
+
+1. install deps
+
+   ```bash
+   npm install
+   ```
+
+2. create `.env.local` with:
+
+   ```
+   OPENAI_API_KEY=sk-...
+   TMDB_API_KEY=...
+   PB_URL=http://localhost:8090
+   PB_EMAIL=admin@example.com
+   PB_PASSWORD=your-pocketbase-password
+   # a hex sha256 of four random messages (see snippet below)
+   CHAT_HASH=<hex encoded hash of 4 random messages>
+   ```
+
+3. run
+
+   ```bash
+   npm run dev
+   ```
+
+## how the upload verifier works
+
+- when the server is configured for a group it stores the `CHAT_HASH` (sha256 of the 4 messages concatenated in a deterministic order).
+- on upload, the app extracts the same 4 timestamps from the uploaded file, canonicalizes those message strings, computes the sha256 and compares with the stored `CHAT_HASH`.
+- if the hashes match the upload is accepted; otherwise the upload is rejected.
+
+### generate `CHAT_HASH` (node snippet)
+
+```js
+// generate-chat-hash.js
+// usage: node generate-chat-hash.js "msg1" "msg2" "msg3" "msg4"
+const crypto = require("crypto");
+
+const parts = process.argv.slice(2);
+if (parts.length !== 4) {
+  console.error("pass exactly 4 message strings in the correct anchor order");
+  process.exit(1);
+}
+
+const combined = parts.join("\n");
+const hex = crypto.createHash("sha256").update(combined, "utf8").digest("hex");
+console.log(hex);
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+run:
 
-You can start editing the page by modifying `pages/index.js`. The page auto-updates as you edit the file.
+```bash
+node generate-chat-hash.js "msgA" "msgB" "msgC" "msgD"
+# copy the output into .env.local CHAT_HASH
+```
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.js`.
+## database (pocketbase)
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
+**collections**
 
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `chatrex_data` — stores extracted recommendations
 
-## Learn More
+  - `title` (text, required) — title of the item
+  - `type` (text, required) — one of: `book | movie | tv_show | song | youtube`
+  - `link` (text/url, optional)
+  - `image_url` (text/url, optional)
+  - `mentioned_by` (array of objects, required) — each item: `{ sender: string, timestamp: string }`
 
-To learn more about Next.js, take a look at the following resources:
+- `chatrex_meta` — simple key/value store
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
+  - `key` (text, required, unique) — e.g. `progress_timestamp`
+  - `value` (text) — value for the key
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## notes
 
-## Deploy on Vercel
+- group members are assigned single letter initials to protect privacy.
+- the 4 timestamp hash is a lightweight way to limit uploads to people who have the original export.
+- the upload ui shows progress, token usage and cost.
+- you can close the modal and continue browsing the mentions and it will let you know when the processing is complete.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## contributing
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+want to contribute? open a PR — bug fixes, better parsers for weird export formats, or improved ui are all welcome.
